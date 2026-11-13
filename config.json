@@ -1,0 +1,10 @@
+{
+  "logFile": "skill-lazy.log",
+  "compactCatalog": true,
+  "catalogDescriptionMaxLength": 60,
+  "searchMaxResults": 6,
+  "searchMaxChars": 6000,
+  "loadMaxChars": 30000,
+  "indexDescriptionMaxLength": 48,
+  "loadToolsOnSkillLoad": true
+}

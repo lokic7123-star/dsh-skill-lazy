@@ -82,3 +82,15 @@ node tests/mock.mjs   # 12 条断言：分词/排序/截断/三个工具/目录�
 ## 许可
 
 MIT
+
+## 使用与二次分发
+
+本项目以 MIT 许可发布：可自由使用、修改、再分发。
+
+**要求**：如果你把本项目的代码（含修改后的版本）用到别的项目或再发布，请注明来源：
+
+- 原项目：`dsh-skill-lazy`
+- 作者：lokic7123-star
+- 仓库：https://github.com/lokic7123-star/dsh-skill-lazy
+
+一句话的形式即可，例如「本插件基于 lokic7123-star 的 dsh-skill-lazy 修改」。

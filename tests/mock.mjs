@@ -149,12 +149,12 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   );
 }
 
-// 9) 与 dsh-tool-lazy 联动：带 tools 参数时调用桥的 reveal，成功才回执「已放开」
+// 9) 与 dsh-tool-lazy 联动（需显式 loadToolsOnSkillLoad: true；默认关，不改工具可见性）
 {
   const { ctx, tools } = makeHost();
   const revealed = [];
   globalThis.__dshToolLazy = { reveal: (agent, names) => revealed.push({ agent, names }) };
-  apply(ctx, {});
+  apply(ctx, { loadToolsOnSkillLoad: true });
   const out = await tools.get('skill_load').execute({ name: 'office-pptx', tools: ['office'] }, exec);
   assert.equal(revealed.length, 1);
   assert.deepEqual(revealed[0].names, ['office']);
@@ -172,6 +172,18 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   const noBridge = await tools.get('skill_load').execute({ name: 'office-pptx', tools: ['github'] }, exec);
   assert.match(noBridge, /未检测到 dsh-tool-lazy/);
   assert.match(noBridge, /tool_load/);
+}
+
+// 9a-2) 默认（不显式开启联动）：只读加载正文，不调用桥、不改工具可见性
+{
+  const { ctx, tools } = makeHost();
+  let called = 0;
+  globalThis.__dshToolLazy = { reveal: () => { called += 1; return { opened: ['office'], unknown: [] }; } };
+  apply(ctx, {});
+  const out = await tools.get('skill_load').execute({ name: 'office-pptx', tools: ['office'] }, exec);
+  assert.equal(called, 0, '默认不应调用工具联动桥');
+  assert.doesNotMatch(out, /已放开工具/);
+  delete globalThis.__dshToolLazy;
 }
 
 // 9d) 模型不可调用的技能不得被 skill_load 绕过（对齐原生 skill 的 modelInvocable 检查）
@@ -228,7 +240,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   globalThis.__dshToolLazy = {
     reveal: () => ({ opened: ['calc'], unknown: ['不存在的组xyz'] }),
   };
-  apply(ctx, {});
+  apply(ctx, { loadToolsOnSkillLoad: true });
   const out = await tools.get('skill_load').execute(
     { name: 'office-pptx', tools: ['calc', '不存在的组xyz'] },
     exec,
@@ -243,7 +255,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 {
   const { ctx, tools } = makeHost();
   globalThis.__dshToolLazy = { reveal: () => ({ opened: [], unknown: [] }) };
-  apply(ctx, {});
+  apply(ctx, { loadToolsOnSkillLoad: true });
   const out = await tools.get('skill_load').execute({ name: 'office-pptx', tools: ['x'] }, exec);
   assert.doesNotMatch(out, /<tool_reveal>已放开工具/);
   assert.match(out, /未能放开任何工具/);

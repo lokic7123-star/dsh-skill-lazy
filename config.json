@@ -6,5 +6,5 @@
   "searchMaxChars": 6000,
   "loadMaxChars": 30000,
   "indexDescriptionMaxLength": 48,
-  "loadToolsOnSkillLoad": true
+  "loadToolsOnSkillLoad": false
 }

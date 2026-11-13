@@ -1,6 +1,8 @@
 # dsh-skill-lazy
 
-给 DeepSeek Harness（DSH）用的技能目录瘦身插件：把「每次请求都带 41 条技能长描述」换成「紧凑目录 + 按关键词检索 + 按名加载」，并可与 `dsh-tool-lazy` 联动，加载技能时顺带放开它需要的工具组。
+> **版本状态：兼容过渡版（0.1.0 之后）。** DSH 原生 `dsh-tool-skill` 已支持 `catalogDescriptionMaxLength`，本插件默认不再接管目录渲染（`compactCatalog: false`），工具联动也默认关闭（`loadToolsOnSkillLoad: false`）。当前仅保留只读的 `skill_search` / `skill_index` / `skill_load` 作为过渡期检索入口：`skill_index` 与 `skill_load` 仍会注册，但默认不改变工具可见集，也不改写技能目录。等原生短目录实测达标、自然任务确认不会漏选技能后，可整体退掉本插件，只留一个只读 `skill_search`。
+
+给 DeepSeek Harness（DSH）用的技能目录瘦身插件：把「每次请求都带 41 条技能长描述」换成「紧凑目录 + 按关键词检索 + 按名加载」，并可与 `dsh-tool-lazy` 可选联动，加载技能时顺带放开它需要的工具组。
 
 零依赖、纯 ESM，不使用任何第三方代码（全部独立实现）。
 
@@ -34,7 +36,7 @@ skill_load({ name: "office-pptx", tools: ["office"] })
 → 同时放开 office 分组的工具（由 dsh-tool-lazy 执行 restrict 重算）
 ```
 
-桥不存在时静默跳过，本插件可独立工作。
+桥不存在时静默跳过，本插件可独立工作。**联动默认关闭**（`loadToolsOnSkillLoad: false`）：过渡版只读，不改工具可见集；确认需要时才显式打开。
 
 ## 配置
 
@@ -48,7 +50,7 @@ skill_load({ name: "office-pptx", tools: ["office"] })
 | `searchMaxChars` | `6000` | 单次检索输出预算 |
 | `loadMaxChars` | `30000` | 单次加载正文上限，超出截断并标注 |
 | `indexDescriptionMaxLength` | `48` | `skill_index` 每条描述字符数 |
-| `loadToolsOnSkillLoad` | `true` | 是否启用工具联动 |
+| `loadToolsOnSkillLoad` | `false` | 是否启用工具联动（默认关：`skill_load` 只读，不改变工具可见集） |
 | `logFile` | `skill-lazy.log` | 插件目录内的运行日志 |
 
 ## 安装

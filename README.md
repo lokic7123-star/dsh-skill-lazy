@@ -1,6 +1,12 @@
 # dsh-skill-lazy
 
-> **版本状态：兼容过渡版（0.1.0 之后）。** DSH 原生 `dsh-tool-skill` 已支持 `catalogDescriptionMaxLength`，本插件默认不再接管目录渲染（`compactCatalog: false`），工具联动也默认关闭（`loadToolsOnSkillLoad: false`）。当前仅保留只读的 `skill_search` / `skill_index` / `skill_load` 作为过渡期检索入口：`skill_index` 与 `skill_load` 仍会注册，但默认不改变工具可见集，也不改写技能目录。等原生短目录实测达标、自然任务确认不会漏选技能后，可整体退掉本插件，只留一个只读 `skill_search`。
+> **版本状态：目录压缩默认开启（`compactCatalog: true`），工具联动默认关闭。**
+>
+> 原生 `dsh-tool-skill` 确实支持 `catalogDescriptionMaxLength`，但**实测不可从用户层配置到**：宿主顶层的 `tool-skill` 行在 `dsh-web-app/cordis.patch.yml` 里是 `disabled: true`，真正运行的是 `preset-standard` 的 `config.plugins` 子行（`dsh-web-app/presets/cordis.patch.yml:125-131`）；按 `dsh-base` 的规则，patch 只能覆盖同一层的行，因此 profile 里写 `- id: tool-skill` + `config.catalogDescriptionMaxLength` 不会生效。要改只能整段重述该 preset（约 140 行），代价是冻结上游更新——为几百 token 不划算。
+>
+> 所以在真机验证里，目录压缩仍由本插件承担；`skill_load` 的工具联动保持默认关闭（`loadToolsOnSkillLoad: false`）。
+>
+> 实测（40 个技能、deepseek-flash、真实请求 usage）：原生 500 字符截断时目录正文 10,177 字符；本插件压到 60 字符后 3,878 字符，单次请求输入 token 由 18.3K 降到 16.7K。5 个「不点名技能」的选型抽测全部命中正确技能。
 
 给 DeepSeek Harness（DSH）用的技能目录瘦身插件：把「每次请求都带 41 条技能长描述」换成「紧凑目录 + 按关键词检索 + 按名加载」，并可与 `dsh-tool-lazy` 可选联动，加载技能时顺带放开它需要的工具组。
 
@@ -44,8 +50,8 @@ skill_load({ name: "office-pptx", tools: ["office"] })
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `compactCatalog` | `false` | 是否由本插件改写目录消息。默认关：优先用宿主原生 `dsh-tool-skill` 的 `catalogDescriptionMaxLength`（profile 里给 `tool-skill` 行配 `config`），只有原生短目录不够用、又确实需要更极端的压缩时才开 |
-| `catalogDescriptionMaxLength` | `60` | 仅当 `compactCatalog: true` 生效，目录里每条描述最多多少字符（16–500） |
+| `compactCatalog` | `true` | 是否由本插件改写目录消息。默认真：原生 `catalogDescriptionMaxLength` 无法从用户层覆盖（见文首说明），这是当前唯一可用的目录压缩手段。设 `false` 即退回宿主原生目录 |
+| `catalogDescriptionMaxLength` | `60` | 目录里每条描述最多多少字符（16–500）。60 已通过选型抽测；再小会丢触发词 |
 | `searchMaxResults` | `6` | 检索默认返回条数 |
 | `searchMaxChars` | `6000` | 单次检索输出预算 |
 | `loadMaxChars` | `30000` | 单次加载正文上限，超出截断并标注 |
@@ -70,7 +76,7 @@ skill_load({ name: "office-pptx", tools: ["office"] })
 
 ```bash
 node --check lib/index.js
-node tests/mock.mjs   # 12 条断言：分词/排序/截断/三个工具/目录压缩/fail-open/联动
+node tests/mock.mjs   # 断言覆盖：分词/BM25 排序/截断/三个工具/目录压缩/瀑布顺序/fail-open/联动
 ```
 
 ## 已知限制
@@ -80,10 +86,6 @@ node tests/mock.mjs   # 12 条断言：分词/排序/截断/三个工具/目录�
 - 加载正文超 `loadMaxChars` 会被截断（默认 30K 字符，正常技能不会触发）；被截断时返回体里会带 `<skill_note>` 说明已截断，并提示按 Base directory 直接读 SKILL.md 与 references。
 - 模型不可调用的技能（`disable-model-invocation` / `invocation.modelInvocable === false`）会被 `skill_load` 拒绝，与原生 `skill` 工具一致；这类技能也不会出现在目录与 `skill_search` 结果里。
 - 联动回执只有在 `dsh-tool-lazy` 真的放开工具时才写「已放开工具」；桥返回失败或未安装时写 `<tool_reveal failed="true">`，不会谎报。
-
-## 许可
-
-MIT
 
 ## 许可与署名
 

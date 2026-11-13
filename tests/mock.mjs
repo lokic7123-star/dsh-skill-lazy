@@ -35,9 +35,10 @@ const SKILLS = [
   },
 ];
 
-function makeHost({ skillList = SKILLS, throwOnList = false, throwOnGet = false } = {}) {
+function makeHost({ skillList = SKILLS, bodySkills = null, throwOnList = false, throwOnGet = false } = {}) {
   const tools = new Map();
   const handlers = new Map();
+  const bodies = bodySkills ?? skillList;
   const ctx = {
     tools: {
       register(def) {
@@ -52,7 +53,7 @@ function makeHost({ skillList = SKILLS, throwOnList = false, throwOnGet = false 
       },
       async get(name) {
         if (throwOnGet) throw new Error('provider down');
-        return skillList.find((s) => s.name === name);
+        return bodies.find((s) => s.name === name);
       },
     },
     workingDirectory: { async ensure() { return 'D:/work'; } },
@@ -186,6 +187,32 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   assert.doesNotMatch(search, /i-have-adhd/);
 }
 
+// 9d-2) 目录条目说「禁止」、正文定义说「允许」时也必须拒绝：
+// 原生 skill 在读正文前先查 list() 的 modelInvocable，本插件不能只查正文这一道。
+{
+  const listEntry = {
+    name: 'list-forbidden',
+    description: '目录条目禁止模型调用。',
+    invocation: { modelInvocable: false, userInvocable: true },
+  };
+  const bodyEntry = {
+    ...listEntry,
+    content: '# 正文\n本应不可达',
+    provider: 'filesystem',
+    invocation: { modelInvocable: true, userInvocable: true },
+  };
+  const { ctx, tools } = makeHost({ skillList: [listEntry], bodySkills: [bodyEntry] });
+  apply(ctx, {});
+  await assert.rejects(
+    () => tools.get('skill_load').execute({ name: 'list-forbidden' }, exec),
+    (err) => {
+      assert.match(err.message, /不允许模型调用/);
+      assert.doesNotMatch(err.message, /本应不可达/);
+      return true;
+    },
+  );
+}
+
 // 9e) 正文超预算时必须显式告知截断与后续读取路径
 {
   const { ctx, tools } = makeHost();
@@ -193,6 +220,34 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   const out = await tools.get('skill_load').execute({ name: 'loki-diagnosing-bugs' }, exec);
   assert.match(out, /<skill_note>正文超出单次预算/);
   assert.match(out, /SKILL\.md/);
+}
+
+// 9f) 部分成功：一个有效组 + 一个未知组，回执必须分开列出，不能整包报「已放开」
+{
+  const { ctx, tools } = makeHost();
+  globalThis.__dshToolLazy = {
+    reveal: () => ({ opened: ['calc'], unknown: ['不存在的组xyz'] }),
+  };
+  apply(ctx, {});
+  const out = await tools.get('skill_load').execute(
+    { name: 'office-pptx', tools: ['calc', '不存在的组xyz'] },
+    exec,
+  );
+  assert.match(out, /<tool_reveal>已放开工具：calc<\/tool_reveal>/);
+  assert.match(out, /<tool_reveal failed="true">未找到工具或分组：不存在的组xyz/);
+  assert.doesNotMatch(out, /已放开工具：calc, 不存在的组xyz/);
+  delete globalThis.__dshToolLazy;
+}
+
+// 9g) 桥回报全空（既没放开也没找到）时不得输出「已放开」
+{
+  const { ctx, tools } = makeHost();
+  globalThis.__dshToolLazy = { reveal: () => ({ opened: [], unknown: [] }) };
+  apply(ctx, {});
+  const out = await tools.get('skill_load').execute({ name: 'office-pptx', tools: ['x'] }, exec);
+  assert.doesNotMatch(out, /<tool_reveal>已放开工具/);
+  assert.match(out, /未能放开任何工具/);
+  delete globalThis.__dshToolLazy;
 }
 
 // 10) 目录压缩：catalog 消息被换成紧凑文本，source 元数据原样保留

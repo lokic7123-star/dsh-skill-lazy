@@ -26,6 +26,13 @@ const SKILLS = [
     provider: 'filesystem',
     invocation: { modelInvocable: true, userInvocable: false },
   },
+  {
+    name: 'i-have-adhd',
+    description: '按 ADHD 读者习惯组织输出的用户专用技能。',
+    content: '# adhd\n仅用户可调用',
+    provider: 'filesystem',
+    invocation: { modelInvocable: false, userInvocable: true },
+  },
 ];
 
 function makeHost({ skillList = SKILLS, throwOnList = false, throwOnGet = false } = {}) {
@@ -141,7 +148,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   );
 }
 
-// 9) 与 dsh-tool-lazy 联动：带 tools 参数时调用桥的 reveal
+// 9) 与 dsh-tool-lazy 联动：带 tools 参数时调用桥的 reveal，成功才回执「已放开」
 {
   const { ctx, tools } = makeHost();
   const revealed = [];
@@ -150,8 +157,42 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   const out = await tools.get('skill_load').execute({ name: 'office-pptx', tools: ['office'] }, exec);
   assert.equal(revealed.length, 1);
   assert.deepEqual(revealed[0].names, ['office']);
-  assert.match(out, /tool_reveal/);
+  assert.match(out, /<tool_reveal>已放开工具：office<\/tool_reveal>/);
+
+  // 9b) 桥返回 false ⇒ 必须回执失败，不能谎报已放开
+  globalThis.__dshToolLazy = { reveal: () => false };
+  const failed = await tools.get('skill_load').execute({ name: 'office-pptx', tools: ['github'] }, exec);
+  assert.match(failed, /<tool_reveal failed="true">/);
+  assert.match(failed, /未能放开工具：github/);
+  assert.doesNotMatch(failed, /已放开工具/);
+
+  // 9c) 没有桥 ⇒ 同样回执失败并给出替代路径
   delete globalThis.__dshToolLazy;
+  const noBridge = await tools.get('skill_load').execute({ name: 'office-pptx', tools: ['github'] }, exec);
+  assert.match(noBridge, /未检测到 dsh-tool-lazy/);
+  assert.match(noBridge, /tool_load/);
+}
+
+// 9d) 模型不可调用的技能不得被 skill_load 绕过（对齐原生 skill 的 modelInvocable 检查）
+{
+  const { ctx, tools } = makeHost();
+  apply(ctx, {});
+  await assert.rejects(
+    () => tools.get('skill_load').execute({ name: 'i-have-adhd' }, exec),
+    /不允许模型调用/,
+  );
+  // 且它不应出现在检索与目录里
+  const search = await tools.get('skill_search').execute({ query: 'adhd' }, exec);
+  assert.doesNotMatch(search, /i-have-adhd/);
+}
+
+// 9e) 正文超预算时必须显式告知截断与后续读取路径
+{
+  const { ctx, tools } = makeHost();
+  apply(ctx, { loadMaxChars: 2000 });
+  const out = await tools.get('skill_load').execute({ name: 'loki-diagnosing-bugs' }, exec);
+  assert.match(out, /<skill_note>正文超出单次预算/);
+  assert.match(out, /SKILL\.md/);
 }
 
 // 10) 目录压缩：catalog 消息被换成紧凑文本，source 元数据原样保留

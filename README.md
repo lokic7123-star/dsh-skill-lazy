@@ -75,7 +75,9 @@ node tests/mock.mjs   # 12 条断言：分词/排序/截断/三个工具/目录�
 
 - 目录压缩依赖宿主 catalog 消息的 `source.kind === "skill-catalog"`；宿主若改这个内部约定，插件会自动跳过压缩（fail-open），不影响功能。
 - BM25 是词法检索，跨语言召回弱：中文查询主要命中中文描述，英文查询要命中英文描述。技能描述建议中英混排。
-- 加载正文超 `loadMaxChars` 会被截断（默认 30K 字符，正常技能不会触发）。
+- 加载正文超 `loadMaxChars` 会被截断（默认 30K 字符，正常技能不会触发）；被截断时返回体里会带 `<skill_note>` 说明已截断，并提示按 Base directory 直接读 SKILL.md 与 references。
+- 模型不可调用的技能（`disable-model-invocation` / `invocation.modelInvocable === false`）会被 `skill_load` 拒绝，与原生 `skill` 工具一致；这类技能也不会出现在目录与 `skill_search` 结果里。
+- 联动回执只有在 `dsh-tool-lazy` 真的放开工具时才写「已放开工具」；桥返回失败或未安装时写 `<tool_reveal failed="true">`，不会谎报。
 
 ## 许可
 

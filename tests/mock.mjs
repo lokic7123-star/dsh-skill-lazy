@@ -253,7 +253,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 // 10) 目录压缩：catalog 消息被换成紧凑文本，source 元数据原样保留
 {
   const { ctx, handlers } = makeHost();
-  apply(ctx, { catalogDescriptionMaxLength: 12 });
+  apply(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 });
   const original = {
     id: 'm1',
     role: 'user',
@@ -293,7 +293,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 // 13) 顺序正确性：prepend 让本插件排在宿主目录注入器外侧，能覆盖它刚插入的 catalog
 {
   const { ctx, handlers } = makeHost();
-  apply(ctx, {});
+  apply(ctx, { compactCatalog: true });
   // 模拟 dsh-tool-skill：在本插件之后注册，往消息尾部追加长目录
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next();

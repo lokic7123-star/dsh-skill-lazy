@@ -42,8 +42,8 @@ skill_load({ name: "office-pptx", tools: ["office"] })
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `compactCatalog` | `true` | 是否压缩目录消息；关掉即完全退回官方渲染 |
-| `catalogDescriptionMaxLength` | `60` | 目录里每条描述最多多少字符（16–500） |
+| `compactCatalog` | `false` | 是否由本插件改写目录消息。默认关：优先用宿主原生 `dsh-tool-skill` 的 `catalogDescriptionMaxLength`（profile 里给 `tool-skill` 行配 `config`），只有原生短目录不够用、又确实需要更极端的压缩时才开 |
+| `catalogDescriptionMaxLength` | `60` | 仅当 `compactCatalog: true` 生效，目录里每条描述最多多少字符（16–500） |
 | `searchMaxResults` | `6` | 检索默认返回条数 |
 | `searchMaxChars` | `6000` | 单次检索输出预算 |
 | `loadMaxChars` | `30000` | 单次加载正文上限，超出截断并标注 |

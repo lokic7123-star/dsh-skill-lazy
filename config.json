@@ -1,6 +1,6 @@
 {
   "logFile": "skill-lazy.log",
-  "compactCatalog": false,
+  "compactCatalog": true,
   "catalogDescriptionMaxLength": 60,
   "searchMaxResults": 6,
   "searchMaxChars": 6000,

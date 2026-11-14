@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { apply, tokenize, rankBM25, clip } from '../lib/index.js';
 
+// 测试专用：日志写独立文件，避免污染宿主真实 skill-lazy.log（真机验誓时会读混）。
+const applyReal = apply
+const applyForTest = (ctx, config = {}) => applyReal(ctx, Object.assign({ logFile: 'mock-skill-lazy.log' }, config))
+
+
 /* ----------------------------- 假宿主 ----------------------------- */
 
 const SKILLS = [
@@ -107,14 +112,14 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 // 4) 注册三个工具
 {
   const { ctx, tools } = makeHost();
-  apply(ctx, {});
+  applyForTest(ctx, {});
   assert.deepEqual([...tools.keys()].sort(), ['skill_index', 'skill_load', 'skill_search']);
 }
 
 // 5) skill_search 命中最相关的技能
 {
   const { ctx, tools } = makeHost();
-  apply(ctx, {});
+  applyForTest(ctx, {});
   const out = await tools.get('skill_search').execute({ query: 'ppt 演示' }, exec);
   assert.match(out, /office-pptx/);
 }
@@ -122,7 +127,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 // 6) 中文查询能命中中文描述，英文查询不会误命中中文技能
 {
   const { ctx, tools } = makeHost();
-  apply(ctx, {});
+  applyForTest(ctx, {});
   const zh = await tools.get('skill_search').execute({ query: '乱码' }, exec);
   assert.match(zh, /loki-windows-utf8/);
   const en = await tools.get('skill_search').execute({ query: 'presentation' }, exec);
@@ -132,7 +137,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 // 7) skill_load 返回 skill_content，并带资源目录；超长正文被裁剪
 {
   const { ctx, tools } = makeHost();
-  apply(ctx, { loadMaxChars: 2000 });
+  applyForTest(ctx, { loadMaxChars: 2000 });
   const out = await tools.get('skill_load').execute({ name: 'loki-diagnosing-bugs' }, exec);
   assert.match(out, /<skill_content name="loki-diagnosing-bugs">/);
   assert.match(out, /Base directory for this skill: D:\/skills\/loki-diagnosing-bugs/);
@@ -142,7 +147,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 // 8) skill_load 未知技能抛错且错误信息可行动
 {
   const { ctx, tools } = makeHost();
-  apply(ctx, {});
+  applyForTest(ctx, {});
   await assert.rejects(
     () => tools.get('skill_load').execute({ name: '不存在' }, exec),
     /skill_search/,
@@ -154,7 +159,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   const { ctx, tools } = makeHost();
   const revealed = [];
   globalThis.__dshToolLazy = { reveal: (agent, names) => revealed.push({ agent, names }) };
-  apply(ctx, { loadToolsOnSkillLoad: true });
+  applyForTest(ctx, { loadToolsOnSkillLoad: true });
   const out = await tools.get('skill_load').execute({ name: 'office-pptx', tools: ['office'] }, exec);
   assert.equal(revealed.length, 1);
   assert.deepEqual(revealed[0].names, ['office']);
@@ -179,7 +184,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   const { ctx, tools } = makeHost();
   let called = 0;
   globalThis.__dshToolLazy = { reveal: () => { called += 1; return { opened: ['office'], unknown: [] }; } };
-  apply(ctx, {});
+  applyForTest(ctx, {});
   const out = await tools.get('skill_load').execute({ name: 'office-pptx', tools: ['office'] }, exec);
   assert.equal(called, 0, '默认不应调用工具联动桥');
   assert.doesNotMatch(out, /已放开工具/);
@@ -189,7 +194,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 // 9d) 模型不可调用的技能不得被 skill_load 绕过（对齐原生 skill 的 modelInvocable 检查）
 {
   const { ctx, tools } = makeHost();
-  apply(ctx, {});
+  applyForTest(ctx, {});
   await assert.rejects(
     () => tools.get('skill_load').execute({ name: 'i-have-adhd' }, exec),
     /不允许模型调用/,
@@ -214,7 +219,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
     invocation: { modelInvocable: true, userInvocable: true },
   };
   const { ctx, tools } = makeHost({ skillList: [listEntry], bodySkills: [bodyEntry] });
-  apply(ctx, {});
+  applyForTest(ctx, {});
   await assert.rejects(
     () => tools.get('skill_load').execute({ name: 'list-forbidden' }, exec),
     (err) => {
@@ -228,7 +233,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 // 9e) 正文超预算时必须显式告知截断与后续读取路径
 {
   const { ctx, tools } = makeHost();
-  apply(ctx, { loadMaxChars: 2000 });
+  applyForTest(ctx, { loadMaxChars: 2000 });
   const out = await tools.get('skill_load').execute({ name: 'loki-diagnosing-bugs' }, exec);
   assert.match(out, /<skill_note>正文超出单次预算/);
   assert.match(out, /SKILL\.md/);
@@ -240,7 +245,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   globalThis.__dshToolLazy = {
     reveal: () => ({ opened: ['calc'], unknown: ['不存在的组xyz'] }),
   };
-  apply(ctx, { loadToolsOnSkillLoad: true });
+  applyForTest(ctx, { loadToolsOnSkillLoad: true });
   const out = await tools.get('skill_load').execute(
     { name: 'office-pptx', tools: ['calc', '不存在的组xyz'] },
     exec,
@@ -255,7 +260,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 {
   const { ctx, tools } = makeHost();
   globalThis.__dshToolLazy = { reveal: () => ({ opened: [], unknown: [] }) };
-  apply(ctx, { loadToolsOnSkillLoad: true });
+  applyForTest(ctx, { loadToolsOnSkillLoad: true });
   const out = await tools.get('skill_load').execute({ name: 'office-pptx', tools: ['x'] }, exec);
   assert.doesNotMatch(out, /<tool_reveal>已放开工具/);
   assert.match(out, /未能放开任何工具/);
@@ -265,7 +270,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 // 10) 目录压缩：catalog 消息被换成紧凑文本，source 元数据原样保留
 {
   const { ctx, handlers } = makeHost();
-  apply(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 });
+  applyForTest(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 });
   const original = {
     id: 'm1',
     role: 'user',
@@ -288,7 +293,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 // 10b) 宿主插入新目录后：新旧两条都必须压缩，且重复处理是幂等的
 {
   const { ctx, handlers } = makeHost();
-  apply(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 });
+  applyForTest(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 });
   const makeCatalog = (id, names) => ({
     id,
     role: 'user',
@@ -318,7 +323,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 // 11) fail-open：发现失败时原样返回 decision，不破坏这一步
 {
   const { ctx, handlers } = makeHost({ throwOnList: true });
-  apply(ctx, {});
+  applyForTest(ctx, {});
   const messages = [{ id: 'm1', role: 'user', content: [{ type: 'text', text: 'x' }] }];
   const decision = await run(handlers, 'agent/pre-step', { agent: exec.agent, signal: exec.signal, messages });
   assert.equal(decision.messages, messages);
@@ -327,7 +332,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 // 12) skill_index 列出全部并裁剪描述
 {
   const { ctx, tools } = makeHost();
-  apply(ctx, { indexDescriptionMaxLength: 10 });
+  applyForTest(ctx, { indexDescriptionMaxLength: 10 });
   const out = await tools.get('skill_index').execute({}, exec);
   assert.match(out, /共 3 个技能/);
   assert.ok(out.split('\n').filter((l) => l.startsWith('- ')).length === 3);
@@ -336,7 +341,7 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
 // 13) 顺序正确性：prepend 让本插件排在宿主目录注入器外侧，能覆盖它刚插入的 catalog
 {
   const { ctx, handlers } = makeHost();
-  apply(ctx, { compactCatalog: true });
+  applyForTest(ctx, { compactCatalog: true });
   // 模拟 dsh-tool-skill：在本插件之后注册，往消息尾部追加长目录
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next();

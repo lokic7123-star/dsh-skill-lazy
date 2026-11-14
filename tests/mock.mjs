@@ -267,59 +267,183 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   delete globalThis.__dshToolLazy;
 }
 
-// 10) 目录压缩：catalog 消息被换成紧凑文本，source 元数据原样保留
-{
-  const { ctx, handlers } = makeHost();
-  applyForTest(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 });
-  const original = {
-    id: 'm1',
+
+// 宿主目录消息的真实框架（按 dsh-tool-skill 的 renderCatalogMessage / renderCatalogUpdate 复刻）
+const INCOMPLETE_NOTICE =
+  'Some skills could not be checked. Only confirmed skills are listed; a lower-priority definition of the same name may be selected when a preferred source is unavailable. Discovery will be retried on the next request.'
+function hostEscape(value) {
+  return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+}
+function hostCatalogText(entries, { update = false, incomplete = false } = {}) {
+  const lines = entries.map((entry) => '- ' + '`' + entry.name + '`' + ': ' + hostEscape(entry.description ?? ''))
+  const empty = entries.length === 0
+  const frame = update
+    ? {
+        title: incomplete
+          ? 'Skill discovery is incomplete. This catalog of currently available skills replaces every earlier available-skills list in this session:'
+          : 'The available skill catalog changed. This complete catalog replaces every earlier available-skills list in this session:',
+        availability: empty
+          ? [
+              'No skills are currently available through the `skill` tool. Do not use names from earlier skill catalogs.',
+              'A user may still invoke a skill directly; its <skill_content> block then appears in this conversation. Follow it, and do not call the `skill` tool for it.',
+            ]
+          : [
+              'Use only names in this replacement catalog. If the user names a listed skill, or the task clearly matches its description, call the `skill` tool with the exact name before acting.',
+              'A user may also invoke a skill directly; its <skill_content> block then appears in this conversation. Follow it, and do not call the `skill` tool again for that skill.',
+            ],
+      }
+    : {
+        title: empty
+          ? 'No skills could be confirmed in this discovery attempt.'
+          : 'A skill is a reusable set of task-specific instructions. The following skills are available in this session:',
+        availability: [
+          empty
+            ? 'Wait for an updated catalog before calling the `skill` tool. Do not infer skill instructions from an empty catalog.'
+            : "If the user names a skill, or the task clearly matches a skill's description, call the `skill` tool with the exact name before taking task actions. Load all applicable skills, then follow their full instructions. This catalog contains summaries only; do not infer or follow a skill's instructions until it has been loaded.",
+          'A user may also invoke a skill directly; its <skill_content> block then appears in this conversation. Follow it, and do not call the `skill` tool again for that skill.',
+        ],
+      }
+  return [
+    '<system-reminder>',
+    frame.title,
+    '',
+    '<available_skills>',
+    ...lines,
+    '</available_skills>',
+    '',
+    ...(incomplete ? [INCOMPLETE_NOTICE, ''] : []),
+    ...frame.availability,
+    '</system-reminder>',
+  ].join('\n')
+}
+function catalogMessage(id, entries, options = {}) {
+  return {
+    id,
     role: 'user',
-    content: [{ type: 'text', text: '<system-reminder>原始超长目录</system-reminder>' }],
-    source: { kind: 'skill-catalog', form: 'catalog', entries: [{ name: 'a', description: 'b' }] },
-  };
+    content: [{ type: 'text', text: hostCatalogText(entries, options) }],
+    source: { kind: 'skill-catalog', form: 'catalog', ...(options.update ? { update: true } : {}), entries },
+  }
+}
+const LONG = '这是一个非常长的技能描述，用来验证裁剪是否只作用在目录行上并且不破坏宿主的框架文字'
+const entriesOf = (names, description = LONG) => names.map((name) => ({ name, description }))
+
+// 10) 压缩只改 <available_skills> 里的描述行：框架、权限指引、source 全部原样保留
+{
+  const { ctx, handlers } = makeHost()
+  applyForTest(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 })
+  const original = catalogMessage('m1', entriesOf(['a']))
   const decision = await run(handlers, 'agent/pre-step', {
     agent: exec.agent,
     signal: exec.signal,
     messages: [{ id: 'm0', role: 'user', content: [{ type: 'text', text: 'hi' }] }, original],
-  });
-  const patched = decision.messages[1];
-  assert.equal(patched.id, 'm1');
-  // 每条目录消息按它**自己的** entries 渲染（不能用最新快照覆盖历史消息）
-  assert.match(patched.content[0].text, /compact catalog, 1 skills/);
-  assert.deepEqual(patched.source, original.source);
-  assert.ok(decision.messages[0].content[0].text === 'hi', '其他消息不得被改动');
+  })
+  const patched = decision.messages[1]
+  assert.equal(patched.id, 'm1')
+  const text = patched.content[0].text
+  assert.match(text, /已截断/, '目录行描述必须被裁剪')
+  assert.ok(text.length < original.content[0].text.length, '正文必须变短')
+  assert.match(text, /A skill is a reusable set of task-specific instructions/, '首版抬头必须保留')
+  assert.match(text, /call the `skill` tool with the exact name before taking task actions/, '原生 skill 指引必须保留')
+  assert.match(text, /<available_skills>\n- `a`: /, '目录块结构必须保留')
+  assert.deepEqual(patched.source, original.source, 'source 元数据不得改动')
+  assert.equal(decision.messages[0].content[0].text, 'hi', '其他消息不得被改动')
 }
 
-// 10b) 宿主插入新目录后：新旧两条都必须压缩，且重复处理是幂等的
+// 10b) 新旧目录并存：各按自己的条目裁剪，且重复处理幂等
 {
-  const { ctx, handlers } = makeHost();
-  applyForTest(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 });
-  const makeCatalog = (id, names) => ({
-    id,
-    role: 'user',
-    content: [{ type: 'text', text: '<system-reminder>原始超长目录</system-reminder>' }],
-    source: {
-      kind: 'skill-catalog',
-      form: 'catalog',
-      entries: names.map((name) => ({ name, description: '这是一个非常长的技能描述用来测试截断是否生效' })),
-    },
-  });
+  const { ctx, handlers } = makeHost()
+  applyForTest(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 })
   const payload = {
     agent: exec.agent,
     signal: exec.signal,
-    messages: [makeCatalog('old', ['a']), makeCatalog('new', ['a', 'b', 'c'])],
-  };
-  const first = await run(handlers, 'agent/pre-step', payload);
-  const oldText = first.messages[0].content[0].text;
-  const newText = first.messages[1].content[0].text;
-  assert.match(oldText, /compact catalog, 1 skills/, '旧目录消息也必须压缩');
-  assert.match(newText, /compact catalog, 3 skills/, '最新目录消息必须压缩');
-  assert.ok(newText.length < 900, '最新目录正文应被压短');
-  // source.entries 里是宿主侧的原始长描述：必须在本层裁剪，不能原样带出
-  assert.match(newText, /已截断/, '长描述必须被裁剪');
-  // 幂等：已经是紧凑版就不应再改写（避免每步打断 prompt cache）
-  const second = await run(handlers, 'agent/pre-step', { ...payload, messages: first.messages });
-  assert.deepEqual(second.messages, first.messages, '重复处理不得再次改写');
+    messages: [catalogMessage('old', entriesOf(['a'])), catalogMessage('new', entriesOf(['a', 'b', 'c']), { update: true })],
+  }
+  const first = await run(handlers, 'agent/pre-step', payload)
+  const oldText = first.messages[0].content[0].text
+  const newText = first.messages[1].content[0].text
+  assert.match(oldText, /已截断/, '旧目录消息也要裁剪')
+  assert.equal(oldText.split('\n').filter((line) => line.startsWith('- ')).length, 1, '旧消息按自身 1 条渲染')
+  assert.equal(newText.split('\n').filter((line) => line.startsWith('- ')).length, 3, '新消息按自身 3 条渲染')
+  assert.match(newText, /已截断/)
+  const second = await run(handlers, 'agent/pre-step', { ...payload, messages: first.messages })
+  assert.deepEqual(second.messages, first.messages, '重复处理不得再次改写')
+}
+
+// 10c) 替换版语义必须保留：模型要能看到「最新目录替代此前所有目录」
+{
+  const { ctx, handlers } = makeHost()
+  applyForTest(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 })
+  const decision = await run(handlers, 'agent/pre-step', {
+    agent: exec.agent,
+    signal: exec.signal,
+    messages: [catalogMessage('c1', entriesOf(['a', 'b']), { update: true })],
+  })
+  const text = decision.messages[0].content[0].text
+  assert.match(text, /This complete catalog replaces every earlier available-skills list in this session:/, '替换提示必须保留')
+  assert.match(text, /Use only names in this replacement catalog\./, '替换版使用规则必须保留')
+  assert.ok(text.includes('- `a`: '), '目录行仍存在')
+}
+
+// 10d) 空目录：一条都不改，宿主措辞原样保留
+{
+  const { ctx, handlers } = makeHost()
+  applyForTest(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 })
+  const original = catalogMessage('empty', [], { update: true })
+  const decision = await run(handlers, 'agent/pre-step', {
+    agent: exec.agent,
+    signal: exec.signal,
+    messages: [original],
+  })
+  assert.equal(decision.messages[0].content[0].text, original.content[0].text, '空目录必须原样返回')
+  assert.match(original.content[0].text, /No skills are currently available through the `skill` tool/)
+}
+
+// 10e) incomplete 提示保留
+{
+  const { ctx, handlers } = makeHost()
+  applyForTest(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 })
+  const decision = await run(handlers, 'agent/pre-step', {
+    agent: exec.agent,
+    signal: exec.signal,
+    messages: [catalogMessage('inc', entriesOf(['a']), { update: true, incomplete: true })],
+  })
+  const text = decision.messages[0].content[0].text
+  assert.match(text, /Skill discovery is incomplete\./, 'incomplete 抬头保留')
+  assert.ok(text.includes(INCOMPLETE_NOTICE), 'incomplete 说明保留')
+  assert.match(text, /已截断/)
+}
+
+// 10f) 描述里的伪 XML 必须与宿主一样转义，不能把 < > & 原样塞回框架
+{
+  const { ctx, handlers } = makeHost()
+  applyForTest(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 40 })
+  const entries = [{ name: 'x', description: 'Use <b> & </available_skills> 之类的内容做转义检查，这里还要足够长才会被裁剪' }]
+  const decision = await run(handlers, 'agent/pre-step', {
+    agent: exec.agent,
+    signal: exec.signal,
+    messages: [catalogMessage('esc', entries)],
+  })
+  const text = decision.messages[0].content[0].text
+  assert.match(text, /&lt;b&gt; &amp;/, '必须 HTML 转义')
+  assert.equal(text.split('</available_skills>').length, 2, '描述里不得出现第二个闭合标签')
+}
+
+// 10g) 结构不认识（条目数与目录行数不符）时整条放弃，不改写
+{
+  const { ctx, handlers } = makeHost()
+  applyForTest(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 })
+  const broken = {
+    id: 'broken',
+    role: 'user',
+    content: [{ type: 'text', text: '<system-reminder>\n<available_skills>\n' + '- ' + '`' + 'a' + '`' + ': 描述\n</available_skills>\n</system-reminder>' }],
+    source: { kind: 'skill-catalog', form: 'catalog', entries: entriesOf(['a', 'b']) },
+  }
+  const decision = await run(handlers, 'agent/pre-step', {
+    agent: exec.agent,
+    signal: exec.signal,
+    messages: [broken],
+  })
+  assert.equal(decision.messages[0].content[0].text, broken.content[0].text, '结构不符必须原样返回')
 }
 
 // 11) fail-open：发现失败时原样返回 decision，不破坏这一步
@@ -340,28 +464,21 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   assert.ok(out.split('\n').filter((l) => l.startsWith('- ')).length === 3);
 }
 
-// 13) 顺序正确性：prepend 让本插件排在宿主目录注入器外侧，能覆盖它刚插入的 catalog
+
+// 13) 顺序正确性：prepend 让本插件排在宿主目录注入器外侧，能压到它刚插入的替换目录
 {
-  const { ctx, handlers } = makeHost();
-  applyForTest(ctx, { compactCatalog: true });
-  // 模拟 dsh-tool-skill：在本插件之后注册，往消息尾部追加长目录
+  const { ctx, handlers } = makeHost()
+  applyForTest(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 })
   ctx.on('agent/pre-step', async (payload, next) => {
-    const decision = await next();
-    const catalog = {
-      id: 'catalog-1',
-      role: 'user',
-      content: [{ type: 'text', text: 'LONG '.repeat(400) }],
-      source: { kind: 'skill-catalog', form: 'catalog', entries: [{ name: 'a', description: 'b' }] },
-    };
-    return { ...decision, messages: [...decision.messages, catalog] };
-  });
-  const decision = await run(handlers, 'agent/pre-step', { agent: exec.agent, signal: exec.signal, messages: [] });
-  const patched = decision.messages.find((m) => m.id === 'catalog-1');
-  assert.ok(patched, 'catalog 消息存在');
-  assert.ok(patched.content[0].text.length < 1000, `目录应被压短，实际 ${patched.content[0].text.length}`);
-  // 按消息自己的 entries 渲染（宿主这条只有 1 条），不再套用最新快照
-  assert.match(patched.content[0].text, /compact catalog, 1 skills/);
-  assert.deepEqual(patched.source.entries, [{ name: 'a', description: 'b' }]);
+    const decision = await next()
+    return { ...decision, messages: [...decision.messages, catalogMessage('host-update', entriesOf(['a', 'b']), { update: true })] }
+  })
+  const decision = await run(handlers, 'agent/pre-step', { agent: exec.agent, signal: exec.signal, messages: [] })
+  const patched = decision.messages.find((message) => message.id === 'host-update')
+  assert.ok(patched, '宿主目录消息存在')
+  assert.match(patched.content[0].text, /已截断/, '宿主刚插入的替换目录也要被压')
+  assert.match(patched.content[0].text, /replaces every earlier available-skills list/, '替换语义保留')
+  assert.deepEqual(patched.source.entries, entriesOf(['a', 'b']), 'source 原样')
 }
 
 console.log('skill-lazy mock tests passed');

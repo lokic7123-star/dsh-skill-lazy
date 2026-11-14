@@ -315,6 +315,8 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   assert.match(oldText, /compact catalog, 1 skills/, '旧目录消息也必须压缩');
   assert.match(newText, /compact catalog, 3 skills/, '最新目录消息必须压缩');
   assert.ok(newText.length < 900, '最新目录正文应被压短');
+  // source.entries 里是宿主侧的原始长描述：必须在本层裁剪，不能原样带出
+  assert.match(newText, /已截断/, '长描述必须被裁剪');
   // 幂等：已经是紧凑版就不应再改写（避免每步打断 prompt cache）
   const second = await run(handlers, 'agent/pre-step', { ...payload, messages: first.messages });
   assert.deepEqual(second.messages, first.messages, '重复处理不得再次改写');

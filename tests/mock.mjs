@@ -279,9 +279,40 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   });
   const patched = decision.messages[1];
   assert.equal(patched.id, 'm1');
-  assert.match(patched.content[0].text, /compact catalog, 3 skills/);
+  // 每条目录消息按它**自己的** entries 渲染（不能用最新快照覆盖历史消息）
+  assert.match(patched.content[0].text, /compact catalog, 1 skills/);
   assert.deepEqual(patched.source, original.source);
   assert.ok(decision.messages[0].content[0].text === 'hi', '其他消息不得被改动');
+}
+
+// 10b) 宿主插入新目录后：新旧两条都必须压缩，且重复处理是幂等的
+{
+  const { ctx, handlers } = makeHost();
+  apply(ctx, { compactCatalog: true, catalogDescriptionMaxLength: 12 });
+  const makeCatalog = (id, names) => ({
+    id,
+    role: 'user',
+    content: [{ type: 'text', text: '<system-reminder>原始超长目录</system-reminder>' }],
+    source: {
+      kind: 'skill-catalog',
+      form: 'catalog',
+      entries: names.map((name) => ({ name, description: '这是一个非常长的技能描述用来测试截断是否生效' })),
+    },
+  });
+  const payload = {
+    agent: exec.agent,
+    signal: exec.signal,
+    messages: [makeCatalog('old', ['a']), makeCatalog('new', ['a', 'b', 'c'])],
+  };
+  const first = await run(handlers, 'agent/pre-step', payload);
+  const oldText = first.messages[0].content[0].text;
+  const newText = first.messages[1].content[0].text;
+  assert.match(oldText, /compact catalog, 1 skills/, '旧目录消息也必须压缩');
+  assert.match(newText, /compact catalog, 3 skills/, '最新目录消息必须压缩');
+  assert.ok(newText.length < 900, '最新目录正文应被压短');
+  // 幂等：已经是紧凑版就不应再改写（避免每步打断 prompt cache）
+  const second = await run(handlers, 'agent/pre-step', { ...payload, messages: first.messages });
+  assert.deepEqual(second.messages, first.messages, '重复处理不得再次改写');
 }
 
 // 11) fail-open：发现失败时原样返回 decision，不破坏这一步
@@ -321,7 +352,8 @@ const exec = { agent: { id: 'agent-1' }, signal: { throwIfAborted() {} } };
   const patched = decision.messages.find((m) => m.id === 'catalog-1');
   assert.ok(patched, 'catalog 消息存在');
   assert.ok(patched.content[0].text.length < 1000, `目录应被压短，实际 ${patched.content[0].text.length}`);
-  assert.match(patched.content[0].text, /compact catalog, 3 skills/);
+  // 按消息自己的 entries 渲染（宿主这条只有 1 条），不再套用最新快照
+  assert.match(patched.content[0].text, /compact catalog, 1 skills/);
   assert.deepEqual(patched.source.entries, [{ name: 'a', description: 'b' }]);
 }
 

@@ -2,7 +2,7 @@
 
 > **版本状态：目录压缩默认开启（`compactCatalog: true`），工具联动默认关闭。**
 >
-> 原生 `dsh-tool-skill` 确实支持 `catalogDescriptionMaxLength`，但**实测不可从用户层配置到**：宿主顶层的 `tool-skill` 行在 `dsh-web-app/cordis.patch.yml` 里是 `disabled: true`，真正运行的是 `preset-standard` 的 `config.plugins` 子行（`dsh-web-app/presets/cordis.patch.yml:125-131`）；按 `dsh-base` 的规则，patch 只能覆盖同一层的行，因此 profile 里写 `- id: tool-skill` + `config.catalogDescriptionMaxLength` 不会生效。要改只能整段重述该 preset（约 140 行），代价是冻结上游更新——为几百 token 不划算。
+> 原生 `dsh-tool-skill` 确实支持 `catalogDescriptionMaxLength`，但**实测不可从用户层配置到**：宿主顶层的 `tool-skill` 行在 `dsh-web-app/cordis.patch.yml` 里是 `disabled: true`，真正运行的是 `preset-standard` 的 `config.plugins` 子行（`dsh-web-app/presets/cordis.patch.yml:125-131`）；按 `dsh-base` 的规则，patch 只能覆盖同一层的行，因此 profile 里写 `- id: tool-skill` + `config.catalogDescriptionMaxLength` 不会生效。该配置在当前日用 profile 上**无用户层配置入口**（唯一路径是整段重述该 preset 约 140 行、冻结上游更新），所以目录压缩仍由本插件承担。
 >
 > 所以在真机验证里，目录压缩仍由本插件承担；`skill_load` 的工具联动保持默认关闭（`loadToolsOnSkillLoad: false`）。
 >
@@ -18,7 +18,7 @@ DSH 的 `dsh-tool-skill` 会在每个会话里维护一条持久 `skill-catalog`
 
 本插件做三件事：
 
-1. **目录瘦身**：在宿主渲染完 catalog 消息后，把正文重渲染成紧凑版（名字 + 截断描述 + 一句"用 skill_search / skill_load"）。`source` 元数据原样保留，因此宿主自己的变更检测（digest）不会抖动，不会重复插消息。
+1. **目录瘦身**：宿主渲染完 catalog 消息后，只裁剪 `<available_skills>` 块内每条技能的**描述行**（按 `catalogDescriptionMaxLength` 截断，并对 `& < >` 做转义）；目录消息框架（首版抬头、替换版说明、空目录措辞、incomplete 提示、原生 `skill` 工具指引、用户直调说明）与 `source` 元数据原样保留，因此宿主自己的变更检测（digest）不会抖动，不会重复插消息。结构不符时整条放弃压缩（fail-open），幂等不改写。
 2. **检索式发现**：新增 `skill_search`（BM25 + 中文二元组分词），只记得用途、不记得名字时先搜。
 3. **按名加载 + 联动**：`skill_load` 输出与官方 `skill` 工具同形的 `<skill_content>`，并可通过 `tools` 参数调用 `dsh-tool-lazy` 的桥，顺带把对应工具组放开（联动见下）。
 
